@@ -1,0 +1,117 @@
+#include <SPI.h>
+#include <MFRC522.h>
+#include <ESP32Servo.h>
+
+// Pin RFID Reader 1
+#define SS1_PIN 5
+#define RST1_PIN 22
+
+// Pin RFID Reader 2
+#define SS2_PIN 17
+#define RST2_PIN 21
+
+// Pin Servo
+#define SERVO1_PIN 4
+#define SERVO2_PIN 16
+
+// Pin Infrared Sensor
+#define IR1_PIN 32
+#define IR2_PIN 33
+
+// Serial ke ESP32-CAM (gunakan UART1)
+#define CAM1_RX 26   // RX ESP32 (masuk dari TX ESP32-CAM gerbang masuk)
+#define CAM1_TX 27   // TX ESP32 (keluar ke RX ESP32-CAM gerbang masuk)
+#define CAM2_RX 14   // RX ESP32 (masuk dari TX ESP32-CAM gerbang keluar)
+#define CAM2_TX 12   // TX ESP32 (keluar ke RX ESP32-CAM gerbang keluar)
+
+HardwareSerial Cam1Serial(1); // UART1 untuk CAM1
+HardwareSerial Cam2Serial(2); // UART2 untuk CAM2
+
+MFRC522 mfrc522_1(SS1_PIN, RST1_PIN);
+MFRC522 mfrc522_2(SS2_PIN, RST2_PIN);
+
+Servo myServo1;
+Servo myServo2;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Inisialisasi UART ke ESP32-CAM
+  Cam1Serial.begin(115200, SERIAL_8N1, CAM1_RX, CAM1_TX);
+  Cam2Serial.begin(115200, SERIAL_8N1, CAM2_RX, CAM2_TX);
+
+  SPI.begin();
+  mfrc522_1.PCD_Init();
+  mfrc522_2.PCD_Init();
+
+  myServo1.attach(SERVO1_PIN);
+  myServo2.attach(SERVO2_PIN);
+
+  myServo1.write(0);
+  myServo2.write(0);
+
+  pinMode(IR1_PIN, INPUT);
+  pinMode(IR2_PIN, INPUT);
+
+  Serial.println("Tempelkan kartu pada Reader 1 atau Reader 2...");
+}
+
+void loop() {
+  // ==== Reader 1 (gerbang masuk) ====
+  if (mfrc522_1.PICC_IsNewCardPresent() && mfrc522_1.PICC_ReadCardSerial()) {
+    Serial.print("Reader 1 UID: ");
+    for (byte i = 0; i < mfrc522_1.uid.size; i++) {
+      Serial.print(mfrc522_1.uid.uidByte[i], HEX);
+      Serial.print(" ");
+    }
+    Serial.println();
+
+    Serial.println("Reader 1: Servo 1 buka");
+    myServo1.write(90);
+
+    // Kirim perintah foto ke ESP32-CAM gerbang masuk
+    Cam1Serial.println("FOTO");
+
+    mfrc522_1.PICC_HaltA();
+  }
+
+  // ==== Reader 2 (gerbang keluar) ====
+  if (mfrc522_2.PICC_IsNewCardPresent() && mfrc522_2.PICC_ReadCardSerial()) {
+    Serial.print("Reader 2 UID: ");
+    for (byte i = 0; i < mfrc522_2.uid.size; i++) {
+      Serial.print(mfrc522_2.uid.uidByte[i], HEX);
+      Serial.print(" ");
+    }
+    Serial.println();
+
+    Serial.println("Reader 2: Servo 2 buka");
+    myServo2.write(90);
+
+    // Kirim perintah foto ke ESP32-CAM gerbang keluar
+    Cam2Serial.println("FOTO");
+
+    mfrc522_2.PICC_HaltA();
+  }
+
+  // Infrared Sensor 1 (menutup servo 1)
+  if (digitalRead(IR1_PIN) == LOW) {
+    Serial.println("IR1 terdeteksi → Servo 1 tutup");
+    myServo1.write(0);
+  }
+
+  // Infrared Sensor 2 (menutup servo 2)
+  if (digitalRead(IR2_PIN) == LOW) {
+    Serial.println("IR2 terdeteksi → Servo 2 tutup");
+    myServo2.write(0);
+  }
+
+  // Baca balasan dari ESP32-CAM (opsional)
+  if (Cam1Serial.available()) {
+    Serial.print("CAM1: ");
+    Serial.println(Cam1Serial.readStringUntil('\n'));
+  }
+  if (Cam2Serial.available()) {
+    Serial.print("CAM2: ");
+    Serial.println(Cam2Serial.readStringUntil('\n'));
+  }
+}

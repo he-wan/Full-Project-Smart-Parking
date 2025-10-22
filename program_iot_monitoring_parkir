@@ -1,0 +1,167 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+
+// Inisialisasi LCD I2C (alamat 0x27, ukuran 20x4)
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+// Kredensial WiFi
+const char* ssid = "Sarno";
+const char* password = "ayayabcd";
+
+// Kredensial Adafruit IO
+const char* mqtt_server = "io.adafruit.com";
+const int mqtt_port = 1883;
+const char* aio_username = "fanol";
+const char* aio_key = "";
+const char* parking_feed = "fanol/feeds/sensor-data";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// Definisi pin sensor ultrasonik
+#define TRIG1 2
+#define ECHO1 4
+#define TRIG2 5
+#define ECHO2 35
+#define TRIG3 13
+#define ECHO3 12
+#define TRIG4 14
+#define ECHO4 27
+#define TRIG5 26
+#define ECHO5 25
+#define TRIG6 33
+#define ECHO6 34
+
+// Definisi pin LED
+#define LED1 15
+#define LED2 16
+#define LED3 17
+#define LED4 19
+#define LED5 32
+#define LED6 23
+
+void connectToWiFi() {
+  Serial.print("Connecting to WiFi");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi!");
+}
+
+void connectToMQTT() {
+  while (!client.connected()) {
+    Serial.print("Connecting to MQTT...");
+    if (client.connect("ESP32_Client", aio_username, aio_key)) {
+      Serial.println("connected!");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" retrying in 5 seconds...");
+      delay(5000);
+    }
+  }
+}
+
+float readUltrasonicDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH);
+  return duration * 0.034 / 2;
+}
+
+void publishParkingStatus(int status[]) {
+  String payload = "";
+  for (int i = 0; i < 6; i++) {
+    payload += String(status[i]);
+    if (i < 5) payload += ",";
+  }
+  client.publish(parking_feed, payload.c_str());
+  Serial.println("Published parking status: " + payload);
+}
+
+void setup() {
+  pinMode(TRIG1, OUTPUT);
+  pinMode(ECHO1, INPUT);
+  pinMode(TRIG2, OUTPUT);
+  pinMode(ECHO2, INPUT);
+  pinMode(TRIG3, OUTPUT);
+  pinMode(ECHO3, INPUT);
+  pinMode(TRIG4, OUTPUT);
+  pinMode(ECHO4, INPUT);
+  pinMode(TRIG5, OUTPUT);
+  pinMode(ECHO5, INPUT);
+  pinMode(TRIG6, OUTPUT);
+  pinMode(ECHO6, INPUT);
+
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  pinMode(LED3, OUTPUT);
+  pinMode(LED4, OUTPUT);
+  pinMode(LED5, OUTPUT);
+  pinMode(LED6, OUTPUT);
+
+  Serial.begin(115200);
+
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(2, 1);
+  lcd.print("Sistem Monitoring");
+  lcd.setCursor(4, 2);
+  lcd.print("Slot Parkir");
+  delay(2000);
+  lcd.clear();
+
+  connectToWiFi();
+  client.setServer(mqtt_server, mqtt_port);
+}
+
+void loop() {
+  if (!client.connected()) {
+    connectToMQTT();
+  }
+  client.loop();
+
+  float distances[6] = {
+    readUltrasonicDistance(TRIG1, ECHO1),
+    readUltrasonicDistance(TRIG2, ECHO2),
+    readUltrasonicDistance(TRIG3, ECHO3),
+    readUltrasonicDistance(TRIG4, ECHO4),
+    readUltrasonicDistance(TRIG5, ECHO5),
+    readUltrasonicDistance(TRIG6, ECHO6)
+  };
+
+  int statuses[6];
+  for (int i = 0; i < 6; i++) {
+    statuses[i] = (distances[i] < 5) ? 1 : 0;
+  }
+
+  digitalWrite(LED1, statuses[0] ? LOW : HIGH);
+  digitalWrite(LED2, statuses[1] ? LOW : HIGH);
+  digitalWrite(LED3, statuses[2] ? LOW : HIGH);
+  digitalWrite(LED4, statuses[3] ? LOW : HIGH);
+  digitalWrite(LED5, statuses[4] ? LOW : HIGH);
+  digitalWrite(LED6, statuses[5] ? LOW : HIGH);
+
+  lcd.setCursor(1, 0);
+  lcd.print("Sisa Tempat Parkir");
+  lcd.setCursor(2, 1); lcd.print("P1: "); lcd.print(statuses[0]); lcd.setCursor(12, 1); lcd.print("P4: "); lcd.print(statuses[3]);
+  lcd.setCursor(2, 2); lcd.print("P2: "); lcd.print(statuses[1]); lcd.setCursor(12, 2); lcd.print("P5: "); lcd.print(statuses[4]);
+  lcd.setCursor(2, 3); lcd.print("P3: "); lcd.print(statuses[2]); lcd.setCursor(12, 3); lcd.print("P6: "); lcd.print(statuses[5]);
+
+  publishParkingStatus(statuses);
+
+  for (int i = 0; i < 6; i++) {
+    Serial.print("Sensor "); Serial.print(i + 1); Serial.print(": ");
+    Serial.print(distances[i]); Serial.println(" cm");
+  }
+  Serial.println("======================");
+
+  delay(5000);
+}
